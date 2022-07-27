@@ -48,9 +48,9 @@ def snake_kaiming_normal_(tensor, kind='approx', mode='fan_in'):
 class SnakeFunction(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x, alpha, correction=None):
-        sinaxsq = (alpha * x).sin_().square_()
         alpha_coeff = torch.reciprocal(alpha)
-        out = torch.addcmul(x, alpha_coeff, sinaxsq, out=sinaxsq)
+        out = torch.empty_like(x)
+        torch.mul(x, alpha, out=out).sin_().square_().mul_(alpha_coeff).add_(x)
         if correction is not None:
             out.mul_(torch.reciprocal(correction))
         ctx.save_for_backward(x, alpha, correction, out)
@@ -65,10 +65,10 @@ class SnakeFunction(torch.autograd.Function):
         if correction is not None:
             correction_coeff = torch.reciprocal(correction)
             dydx.mul_(correction_coeff)
-            if correction.requires_grad:
+            if ctx.needs_input_grad[2]:
                 dydc = out * -correction_coeff
                 dydc.mul_(grad_output)
-        if alpha.requires_grad:
+        if ctx.needs_input_grad[1]:
             # 1/a * (x * dydx - out)
             alpha_coeff = torch.reciprocal(alpha)
             dyda = (x * dydx).sub_(out).mul_(alpha_coeff)
@@ -82,8 +82,8 @@ class Snake(nn.Module):
         if init == 'periodic':
             # "for tasks with expected periodicity, larger a, 
             # usually from 5 to 50 tend to work well"
-            # => use a gamma distribution with mean 5 and a fat tail
-            gamma = torch.distributions.Gamma(2, 1 / 10)
+            # => use a gamma distribution with median ~5 and a heavy right tail
+            gamma = torch.distributions.Gamma(concentration=1.5, rate=0.1)
             self.alpha = nn.Parameter(gamma.sample((num_channels,)))
         else:  # assume init is a constant
             self.alpha = nn.Parameter(init * torch.ones(num_channels))
