@@ -102,3 +102,15 @@ class Snake(nn.Module):
         if correction is not None:
             correction = correction[dims]
         return SnakeFunction.apply(x, alpha, correction)
+
+torch.manual_seed(0)
+S = Snake(48).cuda()
+S.alpha.requires_grad = False
+x = torch.randn(100, 48, 10 * 16000, device='cuda')
+s = S(x)
+print(torch.cuda.max_memory_allocated() / 1024 / 1024)
+
+x = torch.randn(100, 48, 10 * 16000, device='cuda')
+alpha = torch.randn(48, 1, device='cuda')
+s = x + torch.sin(alpha * x) ** 2 / alpha
+print(torch.cuda.max_memory_allocated() / 1024 / 1024)
