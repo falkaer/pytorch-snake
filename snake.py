@@ -16,7 +16,7 @@ def snake_variance(alpha):
     return 1 + num / (8 * alpha ** 2)
 
 alpha_max = 0.56045
-max_std = sqrt(snake_variance(alpha_max)) # 1.0971017221681962
+max_std = sqrt(snake_variance(alpha_max))  # 1.0971017221681962
 
 def snake_gain(x):
     if torch.is_tensor(x):  # asssume x is alpha
@@ -53,34 +53,27 @@ class SnakeFunction(torch.autograd.Function):
         out = torch.addcmul(x, alpha_coeff, sinaxsq, out=sinaxsq)
         if correction is not None:
             out.mul_(torch.reciprocal(correction))
-            if correction.requires_grad:
-                ctx.save_for_backward(x, alpha, correction, out)
-                return out
-        ctx.save_for_backward(x, alpha, correction)
+        ctx.save_for_backward(x, alpha, correction, out)
         return out
     
     @staticmethod
     def backward(ctx, grad_output):
-        x, alpha, correction, *_ = ctx.saved_tensors
-        ax = alpha * x
-        if alpha.requires_grad:
-            sinaxsq = torch.sin(ax).square_()
-        sin2ax = torch.sin_(ax.mul_(2))
+        x, alpha, correction, out = ctx.saved_tensors
         dyda, dydc = None, None
-        if alpha.requires_grad:
-            # 1/a * (x * sin(2ax) - 1/a * sin(ax)^2)
-            alpha_coeff = torch.reciprocal(alpha)
-            dyda = sinaxsq.mul_(-alpha_coeff).addcmul_(x, sin2ax).mul_(alpha_coeff).mul_(grad_output)
         # 1 + sin(2ax)
-        dydx = sin2ax.add_(1).mul_(grad_output)
+        dydx = torch.sin_((alpha * x).mul_(2)).add_(1)
         if correction is not None:
             correction_coeff = torch.reciprocal(correction)
             dydx.mul_(correction_coeff)
-            if alpha.requires_grad:
-                dyda.mul_(correction_coeff)
             if correction.requires_grad:
-                out, = _
-                dydc = out.mul(-correction_coeff).mul_(grad_output)
+                dydc = out * -correction_coeff
+                dydc.mul_(grad_output)
+        if alpha.requires_grad:
+            # 1/a * (x * dydx - out)
+            alpha_coeff = torch.reciprocal(alpha)
+            dyda = (x * dydx).sub_(out).mul_(alpha_coeff)
+            dyda.mul_(grad_output)
+        dydx.mul_(grad_output)
         return dydx, dyda, dydc
 
 class Snake(nn.Module):
