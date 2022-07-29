@@ -10,21 +10,27 @@ def exp(x):
 def sqrt(x):
     return torch.sqrt(x) if torch.is_tensor(x) else math.sqrt(x)
 
-# proposition 1
 def snake_variance(alpha):
     num = 1 + exp(-8 * alpha ** 2) - 2 * exp(-4 * alpha ** 2)
     return 1 + num / (8 * alpha ** 2)
 
-alpha_max = 0.56045
-max_std = sqrt(snake_variance(alpha_max))  # 1.0971017221681962
+def snake_second_moment(alpha):
+    num = 3 + exp(-8 * alpha ** 2) - 4 * exp(-2 * alpha ** 2)
+    return 1 + num / (8 * alpha ** 2)
+
+alpha_max_var = 0.5604532115
+max_std = sqrt(snake_variance(alpha_max_var))  # 1.0971017221...
+
+alpha_max_second_moment = 0.65797
+max_second_moment_sqrt = sqrt(snake_second_moment(alpha_max_second_moment))  # 1.1787158655
 
 def snake_gain(x):
-    if torch.is_tensor(x):  # asssume x is alpha
-        return sqrt(snake_variance(x))
+    if torch.is_tensor(x):  # assume x is alpha
+        return 1 / sqrt(snake_second_moment(x))
     elif x == 'approx':
         return 1
     elif x == 'max':
-        return max_std
+        return 1 / max_second_moment_sqrt
     else:
         raise ValueError('undefined gain')
 
@@ -61,17 +67,20 @@ class SnakeFunction(torch.autograd.Function):
         x, alpha, correction, out = ctx.saved_tensors
         dyda, dydc = None, None
         # 1 + sin(2ax)
-        dydx = torch.sin_((alpha * x).mul_(2)).add_(1)
+        dydx = torch.empty_like(grad_output)
+        torch.mul(x, 2 * alpha, out=dydx).add_(1)
         if correction is not None:
             correction_coeff = torch.reciprocal(correction)
             dydx.mul_(correction_coeff)
             if ctx.needs_input_grad[2]:
-                dydc = out * -correction_coeff
+                dydc = torch.empty_like(grad_output)
+                torch.mul(out, -correction_coeff, out=dydc)
                 dydc.mul_(grad_output)
         if ctx.needs_input_grad[1]:
             # 1/a * (x * dydx - out)
             alpha_coeff = torch.reciprocal(alpha)
-            dyda = (x * dydx).sub_(out).mul_(alpha_coeff)
+            dyda = torch.empty_like(grad_output)
+            torch.mul(x, dydx, out=dyda).sub_(out).mul_(alpha_coeff)
             dyda.mul_(grad_output)
         dydx.mul_(grad_output)
         return dydx, dyda, dydc
