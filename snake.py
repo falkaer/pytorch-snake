@@ -121,7 +121,7 @@ class Snake(nn.Module):
     def forward(self, x):
         # reference: x + torch.sin(self.alpha * x) ** 2 / self.alpha
         correction = snake_correction(self.alpha, kind=self.correction)
-        correction = tensor_like(correction, self.alpha)
+        correction = correction if correction is None else tensor_like(correction, self.alpha)
         dims = (Ellipsis,) + (None,) * (x.ndim - self.alpha.ndim - 1)
         alpha = self.alpha[dims]
         if correction is not None:
