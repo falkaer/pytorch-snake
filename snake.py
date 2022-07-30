@@ -4,6 +4,9 @@ import torch.nn.init as init
 
 import math
 
+def tensor_like(x, y):
+    return torch.as_tensor(x, dtype=y.dtype, device=y.device)
+
 def exp(x):
     return torch.exp(x) if torch.is_tensor(x) else math.exp(x)
 
@@ -24,6 +27,14 @@ max_std = sqrt(snake_variance(alpha_max_var))  # 1.0971017221...
 alpha_max_second_moment = 0.65797
 max_second_moment_sqrt = sqrt(snake_second_moment(alpha_max_second_moment))  # 1.1787158655
 
+def snake_correction(alpha, kind=None):
+    if kind == 'std':
+        return torch.sqrt(snake_variance(alpha))
+    elif kind == 'max':
+        return max_std
+    else:
+        return kind
+
 def snake_gain(x):
     if torch.is_tensor(x):  # assume x is alpha
         return 1 / sqrt(snake_second_moment(x))
@@ -35,18 +46,25 @@ def snake_gain(x):
         raise ValueError('undefined gain')
 
 # initialization functions for network parameters preceding a Snake non-linearity
-# pass alpha as 'kind' to use the exact variance
-def snake_kaiming_uniform_(tensor, kind='approx', mode='fan_in'):
+# pass alpha as 'kind' to use the exact second moment
+# optionally pass the correction
+def snake_kaiming_uniform_(tensor, kind='approx', correction=None, mode='fan_in'):
+    assert correction is None or torch.is_tensor(kind)
     fan = init._calculate_correct_fan(tensor, mode)
+    correction = snake_correction(kind, correction)
     gain = snake_gain(kind)
+    gain = correction ** 2 * gain if correction is not None else gain
     std = gain / math.sqrt(fan)
     bound = math.sqrt(3.0) * std
     with torch.no_grad():
         return tensor.uniform_(-bound, bound)
 
-def snake_kaiming_normal_(tensor, kind='approx', mode='fan_in'):
+def snake_kaiming_normal_(tensor, kind='approx', correction=None, mode='fan_in'):
+    assert correction is None or torch.is_tensor(kind)
     fan = init._calculate_correct_fan(tensor, mode)
+    correction = snake_correction(kind, correction)
     gain = snake_gain(kind)
+    gain = correction ** 2 * gain if correction is not None else gain
     std = gain / math.sqrt(fan)
     with torch.no_grad():
         return tensor.normal_(0, std)
@@ -68,7 +86,7 @@ class SnakeFunction(torch.autograd.Function):
         dyda, dydc = None, None
         # 1 + sin(2ax)
         dydx = torch.empty_like(grad_output)
-        torch.mul(x, 2 * alpha, out=dydx).add_(1)
+        torch.mul(x, 2 * alpha, out=dydx).sin_().add_(1)
         if correction is not None:
             correction_coeff = torch.reciprocal(correction)
             dydx.mul_(correction_coeff)
@@ -94,18 +112,16 @@ class Snake(nn.Module):
             # => use a gamma distribution with median ~5 and a heavy right tail
             gamma = torch.distributions.Gamma(concentration=1.5, rate=0.1)
             self.alpha = nn.Parameter(gamma.sample((num_channels,)))
+        elif callable(init):
+            self.alpha = nn.Parameter(init(num_channels) * torch.ones(num_channels))
         else:  # assume init is a constant
             self.alpha = nn.Parameter(init * torch.ones(num_channels))
         self.correction = correction
     
     def forward(self, x):
         # reference: x + torch.sin(self.alpha * x) ** 2 / self.alpha
-        if self.correction == 'std':
-            correction = torch.sqrt(snake_variance(self.alpha))
-        elif self.correction == 'max':
-            correction = self.alpha.new_full((1,), max_std)
-        else:
-            correction = None
+        correction = snake_correction(self.alpha, kind=self.correction)
+        correction = tensor_like(correction, self.alpha)
         dims = (Ellipsis,) + (None,) * (x.ndim - self.alpha.ndim - 1)
         alpha = self.alpha[dims]
         if correction is not None:

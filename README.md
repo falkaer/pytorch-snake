@@ -40,9 +40,10 @@ In [3]: %timeit x + torch.sin(alpha * x) ** 2 / alpha; torch.cuda.synchronize()
 I have implemented functions for initializing network parameters preceding Snake activations based on Kaiming initialization. They are unclear about this in the paper, but this comes with some caveats:
 * The initialization motivations are weaker than for Kaiming initialization with ReLU because the second moment of
   the activations is not a linear function of the previous layer's variance - we have to assume a distribution on the previous layer's activation. The authors assume a standard Gaussian.
-* The authors discuss initializing based on the approximation that the second moment of the Snake activation is 1 (given a standard Gaussian input). However this is not the case, see the second moment plotted below. We see that the approximation is pretty good for large |x| and close to x=0, but not particularly good otherwise - why not use the actual second moment?
-  ![Second moment as function of alpha](xlsq.png)
+* The authors discuss initializing based on the approximation that the second moment of the Snake activation is 1 (given a standard Gaussian input). However this is not the case, see the second moment plotted below. We see that the approximation is pretty good for large |x| and close to x=0, but not particularly good otherwise. I have added the option to use the exact second moment in the initialization, and the option to account for variance correction in the initialization.
 * In order to justify the initial assumption of the previous layer's variance being standard Gaussian, the authors suggest normalizing the activation output by its standard deviation. If your network is unstable, try using variance correction.
+
+![Second moment as function of alpha](xlsq.png)
 
 ## Variance correction
 
