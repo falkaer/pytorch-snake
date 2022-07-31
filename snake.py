@@ -29,27 +29,24 @@ max_second_moment_sqrt = sqrt(snake_second_moment(alpha_max_second_moment))  # 1
 
 def snake_correction(alpha, kind=None):
     if kind == 'std':
-        return torch.sqrt(snake_variance(alpha))
+        return sqrt(snake_variance(alpha))
     elif kind == 'max':
         return max_std
     else:
         return kind
 
 def snake_gain(x):
-    if torch.is_tensor(x):  # assume x is alpha
-        return 1 / sqrt(snake_second_moment(x))
-    elif x == 'approx':
+    if x == 'approx':
         return 1
     elif x == 'max':
         return 1 / max_second_moment_sqrt
     else:
-        raise ValueError('undefined gain')
+        return 1 / sqrt(snake_second_moment(x))
 
 # initialization functions for network parameters preceding a Snake non-linearity
 # pass alpha as 'kind' to use the exact second moment
 # optionally pass the correction
 def snake_kaiming_uniform_(tensor, kind='approx', correction=None, mode='fan_in'):
-    assert correction is None or torch.is_tensor(kind)
     fan = init._calculate_correct_fan(tensor, mode)
     correction = snake_correction(kind, correction)
     gain = snake_gain(kind)
@@ -60,7 +57,6 @@ def snake_kaiming_uniform_(tensor, kind='approx', correction=None, mode='fan_in'
         return tensor.uniform_(-bound, bound)
 
 def snake_kaiming_normal_(tensor, kind='approx', correction=None, mode='fan_in'):
-    assert correction is None or torch.is_tensor(kind)
     fan = init._calculate_correct_fan(tensor, mode)
     correction = snake_correction(kind, correction)
     gain = snake_gain(kind)
