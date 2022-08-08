@@ -186,8 +186,8 @@ try:
                   x_needs_grad, alpha_needs_grad, cr_needs_grad):
         B, C, N = x.shape
         dydx = torch.empty_like(x, dtype=grad.dtype) if x_needs_grad else None
-        dyda = torch.zeros_like(alpha, dtype=grad.dtype) if alpha_needs_grad else None
-        dydc = torch.zeros_like(cr, dtype=grad.dtype) if cr_needs_grad else None
+        dyda = torch.zeros_like(alpha, dtype=alpha.dtype) if alpha_needs_grad else None
+        dydc = torch.zeros_like(cr, dtype=cr.dtype) if cr_needs_grad else None
         dyda_ = default(dyda, dydc)
         dydc_ = default(dydc, dyda)
         if not exists(dyda_) and not exists(dydc_):
