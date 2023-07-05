@@ -74,7 +74,7 @@ def snake_kaiming_normal_(tensor, kind='approx', correction=None, mode='fan_in')
 try:
     import triton
     import triton.language as tl
-    
+
     @triton.autotune(
             configs=[
                 triton.Config({}, num_warps=4),
@@ -95,21 +95,20 @@ try:
         channel_idx = pid % C
         block_start = tl.program_id(1) * BLOCK_SIZE
         offsets = block_start + tl.arange(0, BLOCK_SIZE)
-        
+
         X = X + batch_idx * X_stride1 + channel_idx * X_stride2
         x = tl.load(X + offsets * X_stride3, mask=offsets < N)
         alpha = tl.load(ALPHA + channel_idx * A_stride)
-        # tl.sin(_: float16) crashes
-        sinax = tl.sin((alpha * x).to(tl.float32)).to(x.type)
+        sinax = tl.sin(alpha * x)
         out = x + sinax * sinax / alpha
-        
+
         if CORR:
             cr = tl.load(CR + channel_idx * C_stride)
             out = out / cr
-        
+
         OUT = OUT + batch_idx * OUT_stride1 + channel_idx * OUT_stride2
         tl.store(OUT + offsets * OUT_stride3, out, mask=offsets < N)
-    
+
     def snake_fwd(x, alpha, cr=None, out=None):
         if out is None:
             out = torch.empty_like(x)
@@ -123,7 +122,7 @@ try:
                                 alpha.stride(0), cr_.stride(0),
                                 C, N, exists(cr), BLOCK_SIZE)
         return out
-    
+
     @triton.autotune(
             configs=[
                 triton.Config({}, num_warps=4),
@@ -152,10 +151,10 @@ try:
         channel_idx = pid % C
         block_start = tl.program_id(1) * BLOCK_SIZE
         offsets = block_start + tl.arange(0, BLOCK_SIZE)
-        
+
         GRAD = GRAD + batch_idx * GRAD_stride1 + channel_idx * GRAD_stride2
         grad = tl.load(GRAD + offsets * GRAD_stride3, mask=offsets < N, other=0)
-        
+
         if CORR:
             cr = tl.load(CR + channel_idx * CR_stride)
         if ALPHA_NEEDS_GRAD | CR_NEEDS_GRAD:
@@ -166,12 +165,11 @@ try:
             X = X + batch_idx * X_stride1 + channel_idx * X_stride2
             x = tl.load(X + offsets * X_stride3, mask=offsets < N, other=0)
             alpha = tl.load(ALPHA + channel_idx * ALPHA_stride)
-            # tl.sin(_: float16) crashes
-            sin2ax = tl.sin((2 * alpha * x).to(tl.float32)).to(x.type)
+            sin2ax = tl.sin(2 * alpha * x)
             dydx = (sin2ax + 1) * grad
             if CORR:
                 dydx = dydx / cr
-        
+
         if X_NEEDS_GRAD:
             DYDX = DYDX + batch_idx * DYDX_stride1 + channel_idx * DYDX_stride2
             tl.store(DYDX + offsets * DYDX_stride3, dydx, mask=offsets < N)
@@ -181,7 +179,7 @@ try:
         if CR_NEEDS_GRAD:
             dydc = -outgrad / cr
             tl.atomic_add(DYDC + channel_idx * DYDC_stride, dydc)
-    
+
     def snake_bwd(x, alpha, cr, out, grad,
                   x_needs_grad, alpha_needs_grad, cr_needs_grad):
         B, C, N = x.shape
@@ -212,27 +210,27 @@ except ImportError:
     @torch.jit.script
     def snake_fwd_jit(x, alpha):
         return x + torch.sin(alpha[..., None] * x) ** 2 * torch.reciprocal(alpha[..., None])
-    
+
     @torch.jit.script
     def snake_fwd_c_jit(x, alpha, correction):
         return snake_fwd_jit(x, alpha) * torch.reciprocal(correction[..., None])
-    
+
     @torch.jit.script
     def snake_dydx_bwd_jit(x, alpha, grad_output):
         return (torch.sin(2 * alpha[..., None] * x) + 1) * grad_output
-    
+
     @torch.jit.script
     def snake_dydx_bwd_c_jit(x, alpha, correction, grad_output):
         return torch.reciprocal(correction[..., None]) * snake_dydx_bwd_jit(x, alpha, grad_output)
-    
+
     @torch.jit.script
     def snake_dyda_bwd_jit(x, dydx, alpha, out, grad_output):
         return torch.reciprocal(alpha) * torch.sum(x * dydx - out * grad_output, dim=(0, 2))
-    
+
     @torch.jit.script
     def snake_dydc_bwd_jit(out, correction, grad_output):
         return -torch.reciprocal(correction) * torch.sum(out * grad_output, dim=(0, 2))
-    
+
     # disable autocast to avoid type promotion
     # to float32 when x is float16
     @torch.cuda.amp.autocast(enabled=False)
@@ -241,7 +239,7 @@ except ImportError:
             return snake_fwd_jit(x, alpha)
         else:
             return snake_fwd_c_jit(x, alpha, cr)
-    
+
     def snake_bwd(x, alpha, cr, out, grad_output,
                   x_needs_grad, alpha_needs_grad, cr_needs_grad):
         dyda, dydc = None, None
@@ -262,7 +260,7 @@ class SnakeFunction(torch.autograd.Function):
         out = snake_fwd(x, alpha, correction)
         ctx.save_for_backward(x, alpha, correction, out)
         return out
-    
+
     @staticmethod
     def backward(ctx, grad_output):
         x, alpha, cr, out = ctx.saved_tensors
@@ -283,7 +281,7 @@ class Snake(nn.Module):
         else:  # assume init is a constant
             self.alpha = nn.Parameter(init * torch.ones(num_channels))
         self.correction = correction
-    
+
     def forward(self, x):
         correction = snake_correction(self.alpha, kind=self.correction)
         alpha = self.alpha.expand(x.size(1))
